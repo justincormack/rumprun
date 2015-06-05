@@ -97,18 +97,20 @@ TAR;
 #define TAR_CHOWN	       128	/* chown files */
 
 /* open a new tarfile handle */
-int tar_open(TAR **t, const char *pathname, tartype_t *type,
+static int tar_open(TAR **t, const char *pathname, tartype_t *type,
 	     int oflags, int mode, int options);
 
+#if 0 /* compiler complains these are not defined, we don't need em */
 /* make a tarfile handle out of a previously-opened descriptor */
-int tar_fdopen(TAR **t, int fd, const char *pathname, tartype_t *type,
+static int tar_fdopen(TAR **t, int fd, const char *pathname, tartype_t *type,
 	       int oflags, int mode, int options);
 
 /* returns the descriptor associated with t */
-int tar_fd(TAR *t);
+static int tar_fd(TAR *t);
+#endif
 
 /* close tarfile handle */
-int tar_close(TAR *t);
+static int tar_close(TAR *t);
 
 
 /***** block.c *************************************************************/
@@ -118,7 +120,7 @@ int tar_close(TAR *t);
 	(*((t)->type->readfunc))((t)->fd, (char *)(buf), T_BLOCKSIZE)
 
 /* read a header block */
-int th_read(TAR *t);
+static int th_read(TAR *t);
 
 
 /***** decode.c ************************************************************/
@@ -159,30 +161,30 @@ int th_read(TAR *t);
 #define th_get_linkname(t) ((t)->th_buf.gnu_longlink \
                             ? (t)->th_buf.gnu_longlink \
                             : (t)->th_buf.linkname)
-char *th_get_pathname(TAR *t);
-mode_t th_get_mode(TAR *t);
-uid_t th_get_uid(TAR *t);
-gid_t th_get_gid(TAR *t);
+static char *th_get_pathname(TAR *t);
+static mode_t th_get_mode(TAR *t);
+static uid_t th_get_uid(TAR *t);
+static gid_t th_get_gid(TAR *t);
 
 
 /***** extract.c ***********************************************************/
 
 /* extract groups of files */
-int tar_extract_all(TAR *t, char *prefix);
+static int tar_extract_all(TAR *t, char *prefix);
 
 /***** util.c *************************************************************/
 
 /* calculate header checksum */
-int th_crc_calc(TAR *t);
+static int th_crc_calc(TAR *t);
 
 /* calculate a signed header checksum */
-int th_signed_crc_calc(TAR *t);
+static int th_signed_crc_calc(TAR *t);
 
 /* compare checksums in a forgiving way */
 #define th_crc_ok(t) (th_get_crc(t) == th_crc_calc(t) || th_get_crc(t) == th_signed_crc_calc(t))
 
 /* string-octal to integer conversion */
-int oct_to_int(char *oct);
+static int oct_to_int(char *oct);
 
 #ifdef __cplusplus
 }
