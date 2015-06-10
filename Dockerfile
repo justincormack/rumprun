@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
   gawk \
   libxen-dev \
   xen-utils-common \
-  xen-utils-4.4 \
+  xen-utils-4.5 \
   vim \
   file \
   genisoimage \
