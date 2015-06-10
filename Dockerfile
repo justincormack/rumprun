@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y \
   strace \
   gawk \
   libxen-dev \
+  xen-utils-common \
+  vim \
+  file \
   make
 
 COPY . /usr/src/rumprun
