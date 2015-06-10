@@ -17,6 +17,8 @@ RUN apt-get update && apt-get install -y \
 
 COPY . /usr/src/rumprun
 
+ENV PATH=$PATH:/usr/src/rumprun/app-tools
+
 RUN \
   cd /usr/src/rumprun && \
   git submodule update --init && \
