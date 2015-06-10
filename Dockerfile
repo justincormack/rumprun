@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
   xen-utils-common \
   vim \
   file \
+  genisoimage \
   make
 
 COPY . /usr/src/rumprun
