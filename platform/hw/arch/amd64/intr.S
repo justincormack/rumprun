@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2014 Antti Kantee.  All Rights Reserved.
+ * Copyright (c) 2014, 2015 Antti Kantee.  All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,84 +26,57 @@
 #include <bmk/multiboot.h>
 #include <bmk/kernel.h>
 
-#define MYMULTIBOOT_FLAGS (MULTIBOOT_PAGE_ALIGN | MULTIBOOT_MEMORY_INFO)
-
-.section .multiboot
-.align 4
-.long MULTIBOOT_HEADER_MAGIC
-.long MYMULTIBOOT_FLAGS
-.long -(MULTIBOOT_HEADER_MAGIC+MYMULTIBOOT_FLAGS)
-
-.section bootstack
-.set stack_size, 4096
-.globl _bootstack
-.comm _bootstack, stack_size
-
-ENTRY(_start)
-	cld
-	movl $(_bootstack + stack_size), %esp
-
-	pushl %ebx
-	pushl %eax
-	call bmk_cons_clear
-	popl %eax
-
-	/* only multiboot is supported for now */
-	cmpl $MULTIBOOT_BOOTLOADER_MAGIC, %eax
-	jne nomultiboot
-
-	call bmk_cpu_boot
-	jmp haltme
-
-nomultiboot:
-	/* we don't have printf available yet, just output manually */
-	mov $nomultimesg, %ebx
-1:
-	movsbl (%ebx), %eax
-	test %al, %al
-	je haltme
-	movl %eax, 0(%esp)
-	call bmk_cons_putc
-	inc %ebx
-	jmp 1b
-
-haltme:
-	cli
-	hlt
-	jmp haltme
-END(_start)
-
-nomultimesg:
-	.asciz "not multibooted, halting!"
-
-ENTRY(bmk_cpu_lgdt)
-	movl 4(%esp), %eax
-	lgdt (%eax)
-	movl $0x10, %eax
-	movl %eax, %ds
-	movl %eax, %es
-	movl %eax, %fs
-	movl %eax, %ss
-	movl %eax, %gs
-
-	popl %eax
-	pushl $0x8
-	pushl %eax
-	lret
-END(bmk_cpu_lgdt)
-
 ENTRY(bmk_cpu_lidt)
-	movl 4(%esp), %eax
-	lidt (%eax)
+	lidt (%rdi)
 	ret
 END(bmk_cpu_lidt)
+
+/*
+ * Default trap handlers, which just print info on what type of trap
+ * it was.  Generally speaking, we don't except trouble here.
+ */
+itsatrap:
+	.asciz "trap: "
+#define SYSTRAP(num, reason) \
+trapstr##num: ;\
+	.asciz reason ;\
+ENTRY(bmk_cpu_trap_##num) \
+	movq $itsatrap, %rdi ;\
+	call bmk_cons_puts ;\
+	movq $trapstr##num, %rdi ;\
+	call bmk_cons_puts ;\
+	movq $'\n', %rdi ;\
+	call bmk_cons_putc ;\
+	iretq ;\
+END(bmk_cpu_trap_##num)
+
+SYSTRAP(0, "#DE")
+SYSTRAP(2, "#NMI")
+SYSTRAP(3, "#BP")
+SYSTRAP(4, "#OF")
+SYSTRAP(5, "#BR")
+SYSTRAP(6, "#UD")
+SYSTRAP(7, "#NM")
+SYSTRAP(8, "#DF")
+SYSTRAP(10, "#TS")
+SYSTRAP(11, "#NP")
+SYSTRAP(12, "#SS")
+SYSTRAP(13, "#GP")
+SYSTRAP(17, "#AC")
+
+/* page fault */
+ENTRY(bmk_cpu_trap_14)
+	mov %cr2, %rdi
+	mov 8(%rsp), %rsi
+	call bmk_cpu_pagefault
+END(bmk_cpu_trap_14)
 
 /*
  * we just ignore most interrupts and traps with this
  * convenient inservice routine
  */
 ENTRY(bmk_cpu_insr)
-	iret
+	iretq
 END(bmk_cpu_insr)
 
 /*
@@ -117,7 +90,7 @@ ENTRY(bmk_cpu_isr_clock)
 	movb $0x20, %al
 	outb %al, $0x20
 	sti
-	iret
+	iretq
 END(bmk_cpu_isr_clock)
 
 /*
@@ -127,19 +100,22 @@ END(bmk_cpu_isr_clock)
 #define INTRSTUB(intnum)						\
 ENTRY(bmk_cpu_isr_##intnum)						\
 	cli								;\
-	pushl %eax							;\
-	pushl %ebx							;\
-	pushl %ecx							;\
-	pushl %edx							;\
-	pushl $intnum							;\
+	pushq %rax							;\
+	pushq %rbx							;\
+	pushq %rcx							;\
+	pushq %rdx							;\
+	pushq %rdi							;\
+	pushq %rsi							;\
+	movq $intnum, %rsi						;\
 	call bmk_isr							;\
-	addl $4, %esp							;\
-	popl %edx							;\
-	popl %ecx							;\
-	popl %ebx							;\
-	popl %eax							;\
+	popq %rsi							;\
+	popq %rdi							;\
+	popq %rdx							;\
+	popq %rcx							;\
+	popq %rbx							;\
+	popq %rax							;\
 	sti								;\
-	iret								;\
+	iretq								;\
 END(bmk_cpu_isr_##intnum)
 
 INTRSTUB(9)

@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2014 Antti Kantee.  All Rights Reserved.
+ * Copyright (c) 2014, 2015 Antti Kantee.  All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -23,39 +23,56 @@
  * SUCH DAMAGE.
  */
 
-#include <bmk/types.h>
 #include <bmk/kernel.h>
 
-#include <bmk-core/core.h>
+#include <bmk-core/printf.h>
 #include <bmk-core/sched.h>
 
-/* enter the kernel with interrupts disabled */
 int bmk_spldepth = 1;
 
 /*
- * i386 MD descriptors, assimilated from NetBSD sys/arch/i386/include/segments.h
+ * amd64 MD descriptors, assimilated from NetBSD
  */
 
 struct region_descriptor {
-	unsigned short rd_limit:16;
-	unsigned int rd_base:32;
+	unsigned short rd_limit;
+	unsigned long rd_base;
 } __attribute__((__packed__));
 
 struct gate_descriptor {
-	unsigned gd_looffset:16;
-	unsigned gd_selector:16;
-	unsigned gd_stkcpy:5;
-	unsigned gd_xx:3;
-	unsigned gd_type:5;
-	unsigned gd_dpl:2;
-	unsigned gd_p:1;
-	unsigned gd_hioffset:16;
+	unsigned long gd_looffset:16;	/* gate offset (lsb) */
+	unsigned long gd_selector:16;	/* gate segment selector */
+	unsigned long gd_ist:3;		/* IST select */
+	unsigned long gd_xx1:5;		/* reserved */
+	unsigned long gd_type:5;	/* segment type */
+	unsigned long gd_dpl:2;		/* segment descriptor priority level */
+	unsigned long gd_p:1;		/* segment descriptor present */
+	unsigned long gd_hioffset:48;	/* gate offset (msb) */
+	unsigned long gd_xx2:8;		/* reserved */
+	unsigned long gd_zero:5;	/* must be zero */
+	unsigned long gd_xx3:19;	/* reserved */
 } __attribute__((__packed__));
 
 static struct gate_descriptor idt[256];
 
 /* interrupt-not-service-routine */
 void bmk_cpu_insr(void);
+
+/* trap "handlers" */
+void bmk_cpu_trap_0(void);
+void bmk_cpu_trap_2(void);
+void bmk_cpu_trap_3(void);
+void bmk_cpu_trap_4(void);
+void bmk_cpu_trap_5(void);
+void bmk_cpu_trap_6(void);
+void bmk_cpu_trap_7(void);
+void bmk_cpu_trap_8(void);
+void bmk_cpu_trap_10(void);
+void bmk_cpu_trap_11(void);
+void bmk_cpu_trap_12(void);
+void bmk_cpu_trap_13(void);
+void bmk_cpu_trap_14(void);
+void bmk_cpu_trap_17(void);
 
 /* actual interrupt service routines */
 void bmk_cpu_isr_clock(void);
@@ -69,72 +86,19 @@ static void
 fillgate(struct gate_descriptor *gd, void *fun)
 {
 
-	gd->gd_hioffset = (unsigned long)fun >> 16; 
-	gd->gd_looffset = (unsigned long)fun;
+	gd->gd_hioffset = (unsigned long)fun >> 16;
+	gd->gd_looffset = (unsigned long)fun & 0xffff;
 
-	/* i was born lucky */
 	gd->gd_selector = 0x8;
-	gd->gd_stkcpy = 0;
-	gd->gd_xx = 0;
+	gd->gd_ist = 0;
 	gd->gd_type = 14;
 	gd->gd_dpl = 0;
 	gd->gd_p = 1;
-}
 
-struct segment_descriptor {
-        unsigned sd_lolimit:16;
-        unsigned sd_lobase:24;
-        unsigned sd_type:5;
-        unsigned sd_dpl:2;
-        unsigned sd_p:1;
-        unsigned sd_hilimit:4;
-        unsigned sd_xx:2;
-        unsigned sd_def32:1;
-        unsigned sd_gran:1;
-        unsigned sd_hibase:8;
-} __attribute__((__packed__));
-
-#define SDT_MEMRWA	19	/* memory read write accessed */
-#define SDT_MEMERA	27	/* memory execute read accessed */
-
-#define SEGMENT_CODE	1
-#define SEGMENT_DATA	2
-#define SEGMENT_GS	3
-
-#define SEG_BYTEGRAN	0
-#define SEG_PAGEGRAN	1
-
-static struct segment_descriptor gdt[4];
-
-static void
-fillsegment(struct segment_descriptor *sd, int type)
-{
-
-	sd->sd_lobase = 0;
-	sd->sd_hibase = 0;
-
-	sd->sd_lolimit = 0xffff;
-	sd->sd_hilimit = 0xf;
-
-	sd->sd_type = type;
-
-	/* i was born luckier */
-	sd->sd_dpl = 0;
-	sd->sd_p = 1;
-	sd->sd_xx = 0;
-	sd->sd_def32 = 1;
-	sd->sd_gran = SEG_PAGEGRAN;
-}
-
-static void
-adjustgs(uintptr_t p)
-{
-	struct segment_descriptor *sd = &gdt[SEGMENT_GS];
-
-	sd->sd_lobase = p & 0xffffff;
-	sd->sd_hibase = (p >> 24) & 0xff;
-
-	__asm__ __volatile__("mov %0, %%gs" :: "r"(8*SEGMENT_GS));
+	gd->gd_zero = 0;
+	gd->gd_xx1 = 0;
+	gd->gd_xx2 = 0;
+	gd->gd_xx3 = 0;
 }
 
 #define PIC1_CMD	0x20
@@ -185,25 +149,30 @@ bmk_cpu_init(void)
 	struct region_descriptor region;
 	int i;
 
-	fillsegment(&gdt[SEGMENT_CODE], SDT_MEMERA);
-	fillsegment(&gdt[SEGMENT_DATA], SDT_MEMRWA);
-	fillsegment(&gdt[SEGMENT_GS], SDT_MEMRWA);
-
-	region.rd_limit = sizeof(gdt)-1;
-	region.rd_base = (unsigned int)(uintptr_t)(void *)gdt;
-	bmk_cpu_lgdt(&region);
-
 	region.rd_limit = sizeof(idt)-1;
-	region.rd_base = (unsigned int)(uintptr_t)(void *)idt;
+	region.rd_base = (uintptr_t)(void *)idt;
 	bmk_cpu_lidt(&region);
 
-	/*
-	 * Apparently things work fine if we don't handle anything,
-	 * so let's not.  (p.s. don't ship this code)
-	 */
 	for (i = 0; i < 32; i++) {
 		fillgate(&idt[i], bmk_cpu_insr);
 	}
+
+#define FILLGATE(n) fillgate(&idt[n], bmk_cpu_trap_##n)
+	FILLGATE(0);
+	FILLGATE(2);
+	FILLGATE(3);
+	FILLGATE(4);
+	FILLGATE(5);
+	FILLGATE(6);
+	FILLGATE(7);
+	FILLGATE(8);
+	FILLGATE(10);
+	FILLGATE(11);
+	FILLGATE(12);
+	FILLGATE(13);
+	FILLGATE(14);
+	FILLGATE(17);
+#undef FILLGATE
 
 	initpic();
 
@@ -218,6 +187,15 @@ bmk_cpu_init(void)
 	outb(TIMER_MODE, TIMER_RATEGEN | TIMER_16BIT);
 	outb(TIMER_CNTR, (TIMER_HZ/HZ) & 0xff);
 	outb(TIMER_CNTR, (TIMER_HZ/HZ) >> 8);
+}
+
+void bmk_cpu_pagefault(void *, void *);
+void
+bmk_cpu_pagefault(void *addr, void *rip)
+{
+
+	bmk_printf("FATAL pagefault at address %p (rip %p)\n", addr, rip);
+	hlt();
 }
 
 int
@@ -291,5 +269,9 @@ void
 bmk_platform_cpu_sched_settls(struct bmk_tcb *next)
 {
 
-	adjustgs(next->btcb_tp);
+	__asm__ __volatile("wrmsr" ::
+		"c" (0xc0000100),
+		"a" ((uint32_t)(next->btcb_tp)),
+		"d" ((uint32_t)(next->btcb_tp >> 32))
+	);
 }
