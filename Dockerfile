@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y \
   libxen-dev \
   xen-utils-common \
   xen-utils-4.5 \
+  qemu-system-x86 \
   vim \
   file \
   genisoimage \
@@ -28,4 +29,5 @@ RUN \
   cd /usr/src/rumprun && \
   git submodule update --init && \
   ./build-rr.sh xen && \
-  ./build-rr.sh hw
+  ./build-rr.sh hw && \
+  ./tests/buildtests.sh hw
