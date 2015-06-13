@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
   xen-utils-common \
   xen-utils-4.5 \
   qemu-system-x86 \
+  gcc-multilib \
   vim \
   file \
   genisoimage \
