@@ -26,11 +26,6 @@
 #include <bmk/multiboot.h>
 #include <bmk/kernel.h>
 
-ENTRY(bmk_cpu_lidt)
-	lidt (%rdi)
-	ret
-END(bmk_cpu_lidt)
-
 /*
  * Default trap handlers, which just print info on what type of trap
  * it was.  Generally speaking, we don't except trouble here.
@@ -40,7 +35,7 @@ itsatrap:
 #define SYSTRAP(num, reason) \
 trapstr##num: ;\
 	.asciz reason ;\
-ENTRY(bmk_cpu_trap_##num) \
+ENTRY(bmk_x86_trap_##num) \
 	movq $itsatrap, %rdi ;\
 	call bmk_cons_puts ;\
 	movq $trapstr##num, %rdi ;\
@@ -48,7 +43,7 @@ ENTRY(bmk_cpu_trap_##num) \
 	movq $'\n', %rdi ;\
 	call bmk_cons_putc ;\
 	iretq ;\
-END(bmk_cpu_trap_##num)
+END(bmk_x86_trap_##num)
 
 SYSTRAP(0, "#DE")
 SYSTRAP(2, "#NMI")
@@ -65,11 +60,12 @@ SYSTRAP(13, "#GP")
 SYSTRAP(17, "#AC")
 
 /* page fault */
-ENTRY(bmk_cpu_trap_14)
+ENTRY(bmk_x86_trap_14)
 	mov %cr2, %rdi
 	mov 8(%rsp), %rsi
 	call bmk_cpu_pagefault
-END(bmk_cpu_trap_14)
+	hlt
+END(bmk_x86_trap_14)
 
 /*
  * we just ignore most interrupts and traps with this
@@ -87,8 +83,10 @@ END(bmk_cpu_insr)
 ENTRY(bmk_cpu_isr_clock)
 	cli
 	call bmk_isr_clock
+	pushq %rax
 	movb $0x20, %al
 	outb %al, $0x20
+	popq %rax
 	sti
 	iretq
 END(bmk_cpu_isr_clock)
@@ -98,7 +96,7 @@ END(bmk_cpu_isr_clock)
  * note: interrupt is acked on the PIC as part of bmk_isr
  */
 #define INTRSTUB(intnum)						\
-ENTRY(bmk_cpu_isr_##intnum)						\
+ENTRY(bmk_x86_isr_##intnum)						\
 	cli								;\
 	pushq %rax							;\
 	pushq %rbx							;\
@@ -116,7 +114,7 @@ ENTRY(bmk_cpu_isr_##intnum)						\
 	popq %rax							;\
 	sti								;\
 	iretq								;\
-END(bmk_cpu_isr_##intnum)
+END(bmk_x86_isr_##intnum)
 
 INTRSTUB(9)
 INTRSTUB(10)
