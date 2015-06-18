@@ -31,4 +31,5 @@ RUN \
   git submodule update --init && \
   ./build-rr.sh xen && \
   ./build-rr.sh hw && \
-  ./tests/buildtests.sh hw
+  ./tests/buildtests.sh hw \
+  ./tests/runtests.sh qemu
