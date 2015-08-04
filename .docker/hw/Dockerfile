@@ -26,10 +26,11 @@ COPY . /usr/src/rumprun
 
 ENV PATH=$PATH:/usr/src/rumprun/app-tools
 
+WORKDIR /usr/src/rumprun
+
 RUN \
-  cd /usr/src/rumprun && \
   git submodule update --init && \
-  ./build-rr.sh xen && \
-  ./build-rr.sh hw && \
-  ./tests/buildtests.sh hw \
-  ./tests/runtests.sh qemu
+  ./build-rr.sh hw
+#RUN \
+#  ./tests/buildtests.sh x86_64 hw elf && \
+#  ./tests/runtests.sh qemu
