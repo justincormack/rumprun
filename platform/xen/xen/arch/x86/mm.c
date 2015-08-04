@@ -41,6 +41,7 @@
 #include <mini-os/lib.h>
 #include <xen/memory.h>
 
+#include <bmk-core/pgalloc.h>
 #include <bmk-core/string.h>
 
 #ifdef MM_DEBUG
@@ -460,7 +461,7 @@ pgentry_t *need_pgt(unsigned long va)
     offset = l4_table_offset(va);
     if ( !(tab[offset] & _PAGE_PRESENT) )
     {
-        pt_pfn = virt_to_pfn(minios_alloc_page());
+        pt_pfn = virt_to_pfn(bmk_pgalloc_one());
         new_pt_frame(&pt_pfn, pt_mfn, offset, L3_FRAME);
     }
     ASSERT(tab[offset] & _PAGE_PRESENT);
@@ -470,7 +471,7 @@ pgentry_t *need_pgt(unsigned long va)
     offset = l3_table_offset(va);
     if ( !(tab[offset] & _PAGE_PRESENT) ) 
     {
-        pt_pfn = virt_to_pfn(minios_alloc_page());
+        pt_pfn = virt_to_pfn(bmk_pgalloc_one());
         new_pt_frame(&pt_pfn, pt_mfn, offset, L2_FRAME);
     }
     ASSERT(tab[offset] & _PAGE_PRESENT);
@@ -479,7 +480,7 @@ pgentry_t *need_pgt(unsigned long va)
     offset = l2_table_offset(va);
     if ( !(tab[offset] & _PAGE_PRESENT) )
     {
-        pt_pfn = virt_to_pfn(minios_alloc_page());
+        pt_pfn = virt_to_pfn(bmk_pgalloc_one());
         new_pt_frame(&pt_pfn, pt_mfn, offset, L1_FRAME);
     }
     ASSERT(tab[offset] & _PAGE_PRESENT);
@@ -552,10 +553,10 @@ unsigned long allocate_ondemand(unsigned long n, unsigned long alignment)
  * va. map f[i*stride]+i*increment for i in 0..n-1.
  */
 #define MAP_BATCH ((STACK_SIZE / 2) / sizeof(mmu_update_t))
-void do_map_frames(unsigned long va,
-                   const unsigned long *mfns, unsigned long n, 
-                   unsigned long stride, unsigned long incr, 
-                   domid_t id, int *err, unsigned long prot)
+void minios_map_frames(unsigned long va,
+		       const unsigned long *mfns, unsigned long n,
+		       unsigned long stride, unsigned long incr,
+		       domid_t id, int *err, unsigned long prot)
 {
     pgentry_t *pgt = NULL;
     unsigned long done = 0;
@@ -564,7 +565,7 @@ void do_map_frames(unsigned long va,
 
     if ( !mfns ) 
     {
-        minios_printk("do_map_frames: no mfns supplied\n");
+        minios_printk("minios_map_frames: no mfns supplied\n");
         return;
     }
     DEBUG("va=%p n=0x%lx, mfns[0]=0x%lx stride=0x%lx incr=0x%lx prot=0x%lx\n",
@@ -628,7 +629,7 @@ void *minios_map_frames_ex(const unsigned long *mfns, unsigned long n,
     if ( !va )
         return NULL;
 
-    do_map_frames(va, mfns, n, stride, incr, id, err, prot);
+    minios_map_frames(va, mfns, n, stride, incr, id, err, prot);
 
     return (void *)va;
 }
@@ -734,7 +735,7 @@ unsigned long minios_alloc_contig_pages(int order, unsigned int addr_bits)
     }
 
     /* Allocate some potentially discontiguous pages */
-    in_va = minios_alloc_pages(order);
+    in_va = (unsigned long)bmk_pgalloc(order);
     if ( !in_va )
     {
         minios_printk("alloc_contig_pages: could not get enough pages (order=0x%x\n",
@@ -822,7 +823,7 @@ unsigned long minios_alloc_contig_pages(int order, unsigned int addr_bits)
     if ( !exch_success )
     {
         /* since the exchanged failed we just free the pages as well */
-        minios_free_pages((void *) in_va, order);
+        bmk_pgfree((void *) in_va, order);
         return 0;
     }
     
@@ -877,12 +878,12 @@ void arch_init_p2m(unsigned long max_pfn)
     unsigned long *l1_list = NULL, *l2_list = NULL, *l3_list;
     unsigned long pfn;
     
-    l3_list = (unsigned long *)minios_alloc_page(); 
+    l3_list = bmk_pgalloc_one(); 
     for ( pfn=0; pfn<max_pfn; pfn++ )
     {
         if ( !(pfn % (L1_P2M_ENTRIES * L2_P2M_ENTRIES)) )
         {
-            l2_list = (unsigned long*)minios_alloc_page();
+            l2_list = bmk_pgalloc_one();
             if ( (pfn >> L3_P2M_SHIFT) > 0 )
             {
                 minios_printk("Error: Too many pfns.\n");
@@ -892,7 +893,7 @@ void arch_init_p2m(unsigned long max_pfn)
         }
         if ( !(pfn % (L1_P2M_ENTRIES)) )
         {
-            l1_list = (unsigned long*)minios_alloc_page();
+            l1_list = bmk_pgalloc_one();
             l2_list[(pfn >> L1_P2M_SHIFT) & L2_P2M_MASK] = 
                 virt_to_mfn(l1_list); 
         }

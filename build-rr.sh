@@ -31,6 +31,19 @@ die ()
 	exit 1
 }
 
+helpme ()
+{
+
+	echo "Usage: $0 [-s srcdir] [-q] hw|xen [-- buildrump.sh options]"
+	printf "\t-s: specify alternative src-netbsd location (expert-only)\n"
+	printf "\t-q: quiet(er) build.  option maybe be specified twice.\n\n"
+	printf "buildrump.sh options are passed to buildrump.sh (expert-only)\n"
+	printf "\n"
+	printf "The toolchain is picked up from the environment.  See the\n"
+	printf "rumprun wiki for more information.\n"
+	exit 1
+}
+
 set -e
 
 # defaults
@@ -41,8 +54,9 @@ BUILDRUMP=$(pwd)/buildrump.sh
 # figure out where gmake lies
 if [ -z "${MAKE}" ]; then
 	MAKE=make
-	type gmake >/dev/null && MAKE=gmake
+	! type gmake >/dev/null 2>&1 || MAKE=gmake
 fi
+type ${MAKE} >/dev/null 2>&1 || die '"make" required but not found'
 
 
 #
@@ -61,18 +75,18 @@ parseargs ()
 		'q')
 			BUILD_QUIET=${BUILD_QUIET:=-}q
 			;;
-		'?')
-			echo HELP!
+		'h'|'?')
+			helpme
 			exit 1
 		esac
 	done
 	shift $((${OPTIND} - 1))
 
-	[ $# -gt 0 ] || die Need platform argument
+	[ $# -gt 0 ] || helpme
 
-	platform=$1
-	export PLATFORMDIR=platform/${platform}
-	[ -d ${PLATFORMDIR} ] || die Platform \"$platform\" not supported!
+	PLATFORM=$1
+	export PLATFORMDIR=platform/${PLATFORM}
+	[ -d ${PLATFORMDIR} ] || die Platform \"$PLATFORM\" not supported!
 	shift
 
 	if [ $# -gt 0 ]; then
@@ -104,11 +118,8 @@ parseargs ()
 checksubmodules ()
 {
 
-	# old git versions need to run submodule in the repo root. *sheesh*
 	# We assume that if the git submodule command fails, it's because
-	# we're using external $RUMPSRC
-	( top="$(git rev-parse --show-cdup)"
-	[ -z "${top}" ] || cd "${top}"
+	# we're using external $RUMPSRC.
 	if git submodule status ${RUMPSRC} 2>/dev/null | grep -q '^-' \
 	    || git submodule status ${BUILDRUMP} 2>/dev/null | grep -q '^-';
 	then
@@ -128,7 +139,30 @@ checksubmodules ()
 		echo '>>'
 		echo -n '>>'
 		for x in 1 2 3 4 5; do echo -n ' !' ; sleep 1 ; done
-	fi )
+	fi
+}
+
+checkprevbuilds ()
+{
+
+	if [ -f .prevbuild ]; then
+		. ./.prevbuild
+		if [ "${PB_MACHINE}" != "${MACHINE}" \
+		    -o "${PB_PLATFORM}" != "${PLATFORM}" ]; then
+			echo '>> ERROR:'
+			echo '>> Building for multiple machine/platform combos'
+			echo '>> from the same rumprun source tree is currently'
+			echo '>> not supported.  See rumprun issue #35.'
+			printf '>> %20s: %s/%s\n' 'Previously built' \
+			    ${PB_PLATFORM} ${PB_MACHINE}
+			printf '>> %20s: %s/%s\n' 'Now building' \
+			    ${PLATFORM} ${MACHINE}
+			exit 1
+		fi
+	else
+		echo PB_MACHINE=${MACHINE} > ./.prevbuild
+		echo PB_PLATFORM=${PLATFORM} >> ./.prevbuild
+	fi
 }
 
 buildrump ()
@@ -141,9 +175,26 @@ buildrump ()
 	    -V RUMP_KERNEL_IS_LIBC=1 -V BUILDRUMP_SYSROOT=yes		\
 	    "$@" tools
 
+	echo '>>'
+	echo '>> Now that we have the appropriate tools, perfoming'
+	echo '>> further setup for rumprun build'
+	echo '>>'
+
 	RUMPMAKE=$(pwd)/${RUMPTOOLS}/rumpmake
+
+	# Check that a clang build is not attempted.  This is the first
+	# place we can do it without replicating buildrump.sh compiler
+	# detection code
+	HAVE_LLVM=$(${RUMPMAKE} -f /dev/null -V '${HAVE_LLVM}')
+	[ ! "${HAVE_LLVM}" = "1" ] \
+	    || die rumprun does not yet support clang ${CC:+(\$CC: $CC)}
+
 	MACHINE=$(${RUMPMAKE} -f /dev/null -V '${MACHINE}')
-	[ -z "${MACHINE}" ] && die could not figure out target machine
+	[ -n "${MACHINE}" ] || die could not figure out target machine
+
+	checkprevbuilds
+
+	makeconfigmk ${PLATFORMDIR}/config.mk
 
 	cat >> ${RUMPTOOLS}/mk.conf << EOF
 .if defined(LIB) && \${LIB} == "pthread"
@@ -152,13 +203,22 @@ PTHREAD_MAKELWP=pthread_makelwp_rumprun.c
 CPPFLAGS.pthread_makelwp_rumprun.c= -I$(pwd)/include
 .endif  # LIB == pthread
 EOF
-	[ -n "${PLATFORM_MKCONF}" ] \
-	    && echo "${PLATFORM_MKCONF}" >> ${RUMPTOOLS}/mk.conf
+	[ -z "${PLATFORM_MKCONF}" ] \
+	    || echo "${PLATFORM_MKCONF}" >> ${RUMPTOOLS}/mk.conf
+
+	TOOLTUPLE=$(${RUMPMAKE} -f bsd.own.mk \
+	    -V '${MACHINE_GNU_PLATFORM:S/--netbsd/-rumprun-netbsd/}')
+	echo "RUMPRUN_TUPLE=${TOOLTUPLE}" >> ${RUMPTOOLS}/mk.conf
 
 	# build rump kernel
 	${BUILDRUMP}/buildrump.sh ${BUILD_QUIET} ${STDJ} -k		\
 	    -s ${RUMPSRC} -T ${RUMPTOOLS} -o ${RUMPOBJ} -d ${RUMPDEST}	\
 	    "$@" build kernelheaders install
+
+	echo '>>'
+	echo '>> Rump kernel components built.  Proceeding to build'
+	echo '>> rumprun bits'
+	echo '>>'
 }
 
 builduserspace ()
@@ -167,21 +227,18 @@ builduserspace ()
 	usermtree ${RUMPDEST}
 
 	LIBS="$(stdlibs ${RUMPSRC})"
-	havecxx && LIBS="${LIBS} $(stdlibsxx ${RUMPSRC})"
+	! havecxx || LIBS="${LIBS} $(stdlibsxx ${RUMPSRC})"
 
 	userincludes ${RUMPSRC} ${LIBS} $(pwd)/lib/librumprun_tester
 	for lib in ${LIBS}; do
 		makeuserlib ${lib}
 	done
-	makeuserlib $(pwd)/lib/librumprun_tester ${platform}
+	makeuserlib $(pwd)/lib/librumprun_tester ${PLATFORM}
 
 	# build unwind bits if we support c++
 	if havecxx; then
 		( cd lib/librumprun_unwind
 		    ${RUMPMAKE} dependall && ${RUMPMAKE} install )
-		CONFIG_CXX=yes
-	else
-		CONFIG_CXX=no
 	fi
 }
 
@@ -198,21 +255,41 @@ buildpci ()
 	fi
 }
 
+wraponetool ()
+{
+
+	configfile=$1
+	tool=$2
+
+	tpath=$(${RUMPMAKE} -f bsd.own.mk -V "\${${tool}}")
+	if ! [ -n "${tpath}" -a -x ${tpath} ]; then
+		die Could not locate buildrump.sh tool \"${tool}\".
+	fi
+	echo "${tool}=${tpath}" >> ${configfile}
+}
+
 makeconfigmk ()
 {
 
 	echo "BUILDRUMP=${BUILDRUMP}" > ${1}
 	echo "RUMPSRC=${RUMPSRC}" >> ${1}
-	echo "CONFIG_CXX=${CONFIG_CXX}" >> ${1}
 	echo "RUMPMAKE=${RUMPMAKE}" >> ${1}
 	echo "BUILDRUMP_TOOLFLAGS=$(pwd)/${RUMPTOOLS}/toolchain-conf.mk" >> ${1}
 	echo "MACHINE=${MACHINE}" >> ${1}
 
-	tools="AR CPP CC INSTALL NM OBJCOPY"
-	havecxx && tools="${tools} CXX"
-	for t in ${tools}; do
-		echo "${t}=$(${RUMPMAKE} -f bsd.own.mk -V "\${${t}}")" >> ${1}
+	# wrap mandatory toolchain bits
+	for t in AR AS CC CPP LD NM OBJCOPY OBJDUMP RANLIB READELF \
+            SIZE STRINGS STRIP; do
+		wraponetool ${1} ${t}
 	done
+
+	# c++ is optional, wrap it iff available
+	if havecxx; then
+		echo "CONFIG_CXX=yes" >> ${1}
+		wraponetool ${1} CXX
+	else
+		echo "CONFIG_CXX=no" >> ${1}
+	fi
 }
 
 
@@ -231,22 +308,24 @@ checksubmodules
 buildrump "$@"
 builduserspace
 
-makeconfigmk ${PLATFORMDIR}/config.mk
-
 # depends on config.mk
 buildpci
 
 # run routine specified in platform.conf
 doextras || die 'platforms extras failed.  tillerman needs tea?'
 
+# create high-level link to rumprun components
+ln -sf ${PLATFORMDIR}/rump ./rumprun
+
 # do final build of the platform bits
 ( cd ${PLATFORMDIR} && ${MAKE} || exit 1)
 [ $? -eq 0 ] || die platform make failed!
 
-# link result to top level (por que?!?)
-ln -sf ${PLATFORMDIR}/rump .
-
-
+# echo some useful information for the user
 echo
+echo '>>'
+echo ">> Built rumprun for ${PLATFORM} : ${TOOLTUPLE}"
+echo ">> cc: ${TOOLTUPLE}-$(${RUMPMAKE} -f bsd.own.mk -V '${ACTIVE_CC}')"
+echo '>>'
 echo ">> $0 ran successfully"
 exit 0

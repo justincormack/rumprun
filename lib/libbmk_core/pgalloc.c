@@ -1,4 +1,4 @@
-/* 
+/*-
  ****************************************************************************
  * (C) 2003 - Rolf Neugebauer - Intel Research Cambridge
  * (C) 2005 - Grzegorz Milos - Intel Research Cambridge
@@ -7,9 +7,9 @@
  *        File: mm.c
  *      Author: Rolf Neugebauer (neugebar@dcs.gla.ac.uk)
  *     Changes: Grzegorz Milos
- *              
+ *
  *        Date: Aug 2003, chages Aug 2005
- * 
+ *
  * Environment: Xen Minimal OS
  * Description: memory management related functions
  *              contains buddy page allocator from Xen.
@@ -21,31 +21,38 @@
  * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
  * sell copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
- * 
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR 
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE 
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
 
 #include <bmk-core/core.h>
+#include <bmk-core/null.h>
 #include <bmk-core/pgalloc.h>
 #include <bmk-core/platform.h>
 #include <bmk-core/printf.h>
 #include <bmk-core/string.h>
 
-#include <bmk/machine/md.h>
+/* XXX */
+#define PAGE_SHIFT bmk_pageshift
 
-#define to_virt(x) x
-#define to_phys(x) x
-#define virt_to_pfn(x) (((unsigned long)x)>>PAGE_SHIFT)
-#define PHYS_PFN(x) (((unsigned long)x)>>PAGE_SHIFT)
+/*
+ * The allocation bitmap is offset to the first page loaded, which is
+ * nice if someone loads memory starting in high ranges.  Notably,
+ * we don't need a pg->va operation since allocation is always done
+ * through the freelists in va, and the pgmap is used only as a lookup
+ * table for coalescing entries when pages are freed.
+ */
+static unsigned long minpage_addr;
+#define va_to_pg(x) (((unsigned long)x - minpage_addr)>>PAGE_SHIFT)
 
 /*
  * ALLOCATION BITMAP
@@ -60,24 +67,25 @@ static unsigned long *alloc_bitmap;
 
 /*
  * Hint regarding bitwise arithmetic in map_{alloc,free}:
- *  -(1<<n)  sets all bits >= n. 
+ *  -(1<<n)  sets all bits >= n.
  *  (1<<n)-1 sets all bits <  n.
  * Variable names in map_{alloc,free}:
  *  *_idx == Index into `alloc_bitmap' array.
  *  *_off == Bit offset within an element of the `alloc_bitmap' array.
  */
 
-#define PAGES_TO_MAPOPVARS(fp, np)					\
+#define PAGES_TO_MAPOPVARS(va, np)					\
 	unsigned long start, end, curr_idx, end_idx;			\
+	unsigned long first_page = va_to_pg(va);			\
 	curr_idx= first_page / PAGES_PER_MAPWORD;			\
 	start	= first_page & (PAGES_PER_MAPWORD-1);			\
 	end_idx	= (first_page + nr_pages) / PAGES_PER_MAPWORD;		\
-	end	= (first_page + nr_pages) & (PAGES_PER_MAPWORD-1);	
+	end	= (first_page + nr_pages) & (PAGES_PER_MAPWORD-1);
 
 static void
-map_alloc(unsigned long first_page, unsigned long nr_pages)
+map_alloc(void *virt, unsigned long nr_pages)
 {
-	PAGES_TO_MAPOPVARS(first_page, nr_pages);
+	PAGES_TO_MAPOPVARS(virt, nr_pages);
 
 	if (curr_idx == end_idx) {
 		alloc_bitmap[curr_idx] |= ((1UL<<end)-1) & -(1UL<<start);
@@ -90,9 +98,9 @@ map_alloc(unsigned long first_page, unsigned long nr_pages)
 }
 
 static void
-map_free(unsigned long first_page, unsigned long nr_pages)
+map_free(void *virt, unsigned long nr_pages)
 {
-	PAGES_TO_MAPOPVARS(first_page, nr_pages);
+	PAGES_TO_MAPOPVARS(virt, nr_pages);
 
 	if (curr_idx == end_idx) {
 		alloc_bitmap[curr_idx] &= -(1UL<<end) | ((1UL<<start)-1);
@@ -123,8 +131,8 @@ struct chunk_tail_st {
 
 /* Linked lists of free chunks of different powers-of-two in size. */
 #define FREELIST_SIZE ((sizeof(void*)<<3)-PAGE_SHIFT)
-static chunk_head_t *free_head[FREELIST_SIZE];
-static chunk_head_t  free_tail[FREELIST_SIZE];
+static chunk_head_t **free_head;
+static chunk_head_t  *free_tail;
 #define FREELIST_EMPTY(_l) ((_l)->next == NULL)
 
 #ifdef BMK_PGALLOC_DEBUG
@@ -136,7 +144,7 @@ static chunk_head_t  free_tail[FREELIST_SIZE];
 static void
 print_allocation(void *start, int nr_pages)
 {
-	unsigned long pfn_start = virt_to_pfn(start);
+	unsigned long pfn_start = va_to_pg(start);
 	int count;
 
 	for (count = 0; count < nr_pages; count++) {
@@ -146,7 +154,7 @@ print_allocation(void *start, int nr_pages)
 			bmk_printf("0");
 	}
 
-	bmk_printf("\n");        
+	bmk_printf("\n");
 }
 
 /*
@@ -160,7 +168,7 @@ print_chunks(void *start, int nr_pages)
 	char chunks[MAXCHUNKS+1], current='A';
 	int order, count;
 	chunk_head_t *head;
-	unsigned long pfn_start = virt_to_pfn(start);
+	unsigned long pfn_start = va_to_pg(start);
 
 	bmk_memset(chunks, (int)'_', MAXCHUNKS);
 	if (nr_pages > MAXCHUNKS) {
@@ -171,9 +179,13 @@ print_chunks(void *start, int nr_pages)
 	for (order=0; order < FREELIST_SIZE; order++) {
 		head = free_head[order];
 		while (!FREELIST_EMPTY(head)) {
+			unsigned long headva;
+
+			headva = va_to_pg(head);
 			for (count = 0; count < 1UL<< head->level; count++) {
-				if(count + virt_to_pfn(head) - pfn_start < 1000)
-					chunks[count + virt_to_pfn(head) - pfn_start] = current;
+				if(count + headva - pfn_start < 1000)
+					chunks[count + headva - pfn_start]
+					    = current;
 			}
 			head = head->next;
 			current++;
@@ -192,12 +204,29 @@ print_chunks(void *start, int nr_pages)
 void
 bmk_pgalloc_loadmem(unsigned long min, unsigned long max)
 {
+	static int called;
 	unsigned long range, bitmap_size;
 	chunk_head_t *ch;
 	chunk_tail_t *ct;
-	int i;
+	unsigned int i;
+
+	if (called)
+		bmk_platform_halt("bmk_pgalloc_loadmem called more than once");
+	called = 1;
 
 	bmk_assert(max > min);
+
+	/*
+	 * XXX: allocate dynamically so that we don't have to know
+	 * PAGE_SIZE at compile-time.  FIXXXME
+	 */
+	free_head = (void *)min;
+	min += FREELIST_SIZE * sizeof(*free_head);
+	free_tail = (void *)min;
+	min += FREELIST_SIZE * sizeof(*free_tail);
+
+	min = bmk_round_page(min);
+	max = bmk_trunc_page(max);
 
 	for (i = 0; i < FREELIST_SIZE; i++) {
 		free_head[i]       = &free_tail[i];
@@ -205,24 +234,18 @@ bmk_pgalloc_loadmem(unsigned long min, unsigned long max)
 		free_tail[i].next  = NULL;
 	}
 
-	min = round_page(min);
-	max = trunc_page(max);
-
 	/* Allocate space for the allocation bitmap. */
 	bitmap_size  = (max+1) >> (PAGE_SHIFT+3);
-	bitmap_size  = round_page(bitmap_size);
-	alloc_bitmap = (unsigned long *)to_virt(min);
+	bitmap_size  = bmk_round_page(bitmap_size);
+	alloc_bitmap = (unsigned long *)min;
 	min         += bitmap_size;
+	minpage_addr = min;
 	range        = max - min;
 
 	/* All allocated by default. */
 	bmk_memset(alloc_bitmap, ~0, bitmap_size);
 	/* Free up the memory we've been given to play with. */
-	map_free(PHYS_PFN(min), range>>PAGE_SHIFT);
-
-	/* The buddy lists are addressed in high memory. */
-	min = (unsigned long) to_virt(min);
-	max = (unsigned long) to_virt(max);
+	map_free((void *)min, range>>PAGE_SHIFT);
 
 	while (range != 0) {
 		/*
@@ -234,8 +257,10 @@ bmk_pgalloc_loadmem(unsigned long min, unsigned long max)
 				break;
 
 		ch = (chunk_head_t *)min;
+
 		min   += (1UL<<i);
 		range -= (1UL<<i);
+
 		ct = (chunk_tail_t *)min-1;
 		i -= PAGE_SHIFT;
 		ch->level       = i;
@@ -248,16 +273,16 @@ bmk_pgalloc_loadmem(unsigned long min, unsigned long max)
 }
 
 /* Allocate 2^@order contiguous pages. Returns a VIRTUAL address. */
-unsigned long
+void *
 bmk_pgalloc(int order)
 {
-	int i;
+	unsigned int i;
 	chunk_head_t *alloc_ch, *spare_ch;
 	chunk_tail_t            *spare_ct;
 
 	/* Find smallest order which can satisfy the request. */
 	for (i = order; i < FREELIST_SIZE; i++) {
-		if (!FREELIST_EMPTY(free_head[i])) 
+		if (!FREELIST_EMPTY(free_head[i]))
 			break;
 	}
 	if (i == FREELIST_SIZE) {
@@ -271,7 +296,7 @@ bmk_pgalloc(int order)
 	alloc_ch->next->pprev = alloc_ch->pprev;
 
 	/* We may have to break the chunk a number of times. */
-	while (i != order) {
+	while (i != (unsigned)order) {
 		/* Split into two equal parts. */
 		i--;
 		spare_ch = (chunk_head_t *)((char *)alloc_ch
@@ -290,8 +315,8 @@ bmk_pgalloc(int order)
 		free_head[i] = spare_ch;
 	}
 
-	map_alloc(PHYS_PFN(to_phys(alloc_ch)), 1UL<<order);
-	return (unsigned long)alloc_ch;
+	map_alloc(alloc_ch, 1UL<<order);
+	return alloc_ch;
 }
 
 void
@@ -302,7 +327,7 @@ bmk_pgfree(void *pointer, int order)
 	unsigned long mask;
 
 	/* First free the chunk */
-	map_free(virt_to_pfn(pointer), 1UL << order);
+	map_free(pointer, 1UL << order);
 
 	/* Create free chunk */
 	freed_ch = (chunk_head_t *)pointer;
@@ -310,19 +335,19 @@ bmk_pgfree(void *pointer, int order)
 	    + (1UL<<(order + PAGE_SHIFT)))-1;
 
 	/* Now, possibly we can conseal chunks together */
-	while (order < FREELIST_SIZE) {
+	while ((unsigned)order < FREELIST_SIZE) {
 		mask = 1UL << (order + PAGE_SHIFT);
 		if ((unsigned long)freed_ch & mask) {
 			to_merge_ch = (chunk_head_t *)((char *)freed_ch - mask);
-			if (allocated_in_map(virt_to_pfn(to_merge_ch))
+			if (allocated_in_map(va_to_pg(to_merge_ch))
 			    || to_merge_ch->level != order)
 				break;
 
 			/* Merge with predecessor */
-			freed_ch = to_merge_ch;   
+			freed_ch = to_merge_ch;
 		} else {
 			to_merge_ch = (chunk_head_t *)((char *)freed_ch + mask);
-			if (allocated_in_map(virt_to_pfn(to_merge_ch))
+			if (allocated_in_map(va_to_pg(to_merge_ch))
 			    || to_merge_ch->level != order)
 				break;
 
@@ -344,7 +369,7 @@ bmk_pgfree(void *pointer, int order)
 	freed_ct->level = order;
 
 	freed_ch->next->pprev = &freed_ch->next;
-	free_head[order] = freed_ch;   
+	free_head[order] = freed_ch;
 
 }
 
@@ -352,14 +377,14 @@ bmk_pgfree(void *pointer, int order)
 void
 sanity_check(void)
 {
-	int x;
+	unsigned int x;
 	chunk_head_t *head;
 
 	for (x = 0; x < FREELIST_SIZE; x++) {
 		for (head = free_head[x];
 		    !FREELIST_EMPTY(head);
 		    head = head->next) {
-			bmk_assert(!allocated_in_map(virt_to_pfn(head)));
+			bmk_assert(!allocated_in_map(va_to_pg(head)));
 			if (head->next)
 				ASSERT(head->next->pprev == &head->next);
 		}

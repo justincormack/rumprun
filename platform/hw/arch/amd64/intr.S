@@ -23,8 +23,8 @@
  * SUCH DAMAGE.
  */
 
-#include <bmk/multiboot.h>
-#include <bmk/kernel.h>
+#include <hw/multiboot.h>
+#include <hw/kernel.h>
 
 /*
  * Default trap handlers, which just print info on what type of trap
@@ -32,20 +32,19 @@
  */
 itsatrap:
 	.asciz "trap: "
-#define SYSTRAP(num, reason) \
-trapstr##num: ;\
-	.asciz reason ;\
-ENTRY(bmk_x86_trap_##num) \
-	movq $itsatrap, %rdi ;\
-	call bmk_cons_puts ;\
-	movq $trapstr##num, %rdi ;\
-	call bmk_cons_puts ;\
-	movq $'\n', %rdi ;\
-	call bmk_cons_putc ;\
-	iretq ;\
-END(bmk_x86_trap_##num)
+#define SYSTRAP(num, reason)						 \
+trapstr##num:								;\
+	.asciz reason							;\
+ENTRY(x86_trap_##num)							 \
+	movq $itsatrap, %rdi						;\
+	call cons_puts							;\
+	movq $trapstr##num, %rdi					;\
+	call cons_puts							;\
+	movq $'\n', %rdi						;\
+	call cons_putc							;\
+	iretq								;\
+END(x86_trap_##num)
 
-SYSTRAP(0, "#DE")
 SYSTRAP(2, "#NMI")
 SYSTRAP(3, "#BP")
 SYSTRAP(4, "#OF")
@@ -59,44 +58,58 @@ SYSTRAP(12, "#SS")
 SYSTRAP(13, "#GP")
 SYSTRAP(17, "#AC")
 
-/* page fault */
-ENTRY(bmk_x86_trap_14)
-	mov %cr2, %rdi
-	mov 8(%rsp), %rsi
-	call bmk_cpu_pagefault
-	hlt
-END(bmk_x86_trap_14)
+/*
+ * Fatal traps.  Well the previous ones might be fatal too, but let's
+ * call these especially fatal.
+ */
+#define FATTRAP(num, reason)						 \
+fattrapstr##num:							;\
+	.asciz reason							;\
+ENTRY(x86_trap_##num)							 \
+	movq $fattrapstr##num, %rdi					;\
+	movq %cr2, %rdx							;\
+	mov $##num, %rcx						;\
+	test $14, %rcx							;\
+	je 1f								;\
+	addq $8, %rsp							;\
+1:									;\
+	movq 0(%rsp), %rsi						;\
+	call cpu_fattrap						;\
+	hlt								;\
+END(x86_trap_##num)
+
+FATTRAP(0, "divide-by-zero")
+FATTRAP(14, "page fault")
 
 /*
  * we just ignore most interrupts and traps with this
  * convenient inservice routine
  */
-ENTRY(bmk_cpu_insr)
+ENTRY(cpu_insr)
 	iretq
-END(bmk_cpu_insr)
+END(cpu_insr)
 
 /*
  * The interrupt handlers don't do the normal accounting for cli-depth,
  * but it's hopefully a safe bet that since we're here, interrupts were
  * unmasked, so we can just unmask them before we return.
  */
-ENTRY(bmk_cpu_isr_clock)
+ENTRY(cpu_isr_clock)
 	cli
-	call bmk_isr_clock
 	pushq %rax
 	movb $0x20, %al
 	outb %al, $0x20
 	popq %rax
 	sti
 	iretq
-END(bmk_cpu_isr_clock)
+END(cpu_isr_clock)
 
 /*
  * Macro to define interrupt stub to call C handler.
- * note: interrupt is acked on the PIC as part of bmk_isr
+ * note: interrupt is acked on the PIC as part of isr
  */
 #define INTRSTUB(intnum)						\
-ENTRY(bmk_x86_isr_##intnum)						\
+ENTRY(x86_isr_##intnum)							\
 	cli								;\
 	pushq %rax							;\
 	pushq %rbx							;\
@@ -105,7 +118,7 @@ ENTRY(bmk_x86_isr_##intnum)						\
 	pushq %rdi							;\
 	pushq %rsi							;\
 	movq $intnum, %rsi						;\
-	call bmk_isr							;\
+	call isr							;\
 	popq %rsi							;\
 	popq %rdi							;\
 	popq %rdx							;\
@@ -114,7 +127,7 @@ ENTRY(bmk_x86_isr_##intnum)						\
 	popq %rax							;\
 	sti								;\
 	iretq								;\
-END(bmk_x86_isr_##intnum)
+END(x86_isr_##intnum)
 
 INTRSTUB(9)
 INTRSTUB(10)

@@ -1,13 +1,3 @@
-%rename cpp_options old_cpp_options
- 
-*cpp_options:
--nostdinc -isystem !BASE!/rump/include -isystem !BASE!/rump/include/c++ %(old_cpp_options) !CPPFLAGS! -D__RUMPRUN__
-
-%rename cc1_options old_cc1_options
-
-*cc1_options:
-%(old_cc1_options) -fno-stack-protector -fno-builtin-sin -fno-builtin-sinf -fno-builtin-cos -fno-builtin-cosf
-
 *startfile:
 
 
@@ -15,10 +5,11 @@
 
 
 *lib:
-!LDFLAGS! !STUBLDLIBS!
+-L!BASE_DIR!/rumprun/lib --start-group -lpthread -lc --end-group 	\
+    !BASE_DIR!/platform/pseudolinkstubs.o
 
 *link:
-%{m64:-m elf_x86_64;mx32:-m elf32_x86_64;m32:-m elf_i386} -T !LDSCRIPT! %:replace-outfile(-lstdc++ -lc++) %{rdynamic:}
+%{m64:-m elf_x86_64;mx32:-m elf32_x86_64;m32:-m elf_i386} %:replace-outfile(-lstdc++ -lc++) %{rdynamic:}
 
 %rename link_libgcc old_link_libgcc
 

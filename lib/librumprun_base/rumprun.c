@@ -54,12 +54,14 @@
 static pthread_mutex_t w_mtx;
 static pthread_cond_t w_cv;
 
+int rumprun_enosys(void);
 int
-rumprun_notmain(int argc, char **argv)
+rumprun_enosys(void)
 {
 
 	return ENOSYS;
 }
+__strong_alias(rumprun_notmain,rumprun_enosys);
 __weak_alias(rumpbake_main1,rumprun_notmain);
 __weak_alias(rumpbake_main2,rumprun_notmain);
 __weak_alias(rumpbake_main3,rumprun_notmain);
@@ -68,6 +70,8 @@ __weak_alias(rumpbake_main5,rumprun_notmain);
 __weak_alias(rumpbake_main6,rumprun_notmain);
 __weak_alias(rumpbake_main7,rumprun_notmain);
 __weak_alias(rumpbake_main8,rumprun_notmain);
+
+__weak_alias(rump_init_server,rumprun_enosys);
 
 void
 rumprun_boot(char *cmdline)
@@ -106,9 +110,8 @@ rumprun_boot(char *cmdline)
 		warnx("FAILED: mount tmpfs on /tmp: %s", strerror(tmpfserrno));
 	}
 
-#ifdef RUMP_SYSPROXY
 	rump_init_server("tcp://0:12345");
-#endif
+
 	_rumprun_config(cmdline);
 
 	/*
@@ -126,6 +129,8 @@ rumprun_boot(char *cmdline)
  * because otherwise libpthread goes haywire because it doesn't understand
  * the concept of multiple main threads (which is sort of understandable ...)
  */
+#define RUMPRUNNER_DONE		0x01
+#define RUMPRUNNER_DAEMON	0x02
 struct rumprunner {
 	int (*rr_mainfun)(int, char *[]);
 	int rr_argc;
@@ -133,7 +138,7 @@ struct rumprunner {
 
 	pthread_t rr_mainthread;
 
-	int rr_done;
+	int rr_flags;
 
 	LIST_ENTRY(rumprunner) rr_entries;
 };
@@ -146,10 +151,9 @@ releaseme(void *arg)
 {
 	struct rumprunner *rr = arg;
 
-	rr->rr_done = 1;
-
 	pthread_mutex_lock(&w_mtx);
 	rumprun_done++;
+	rr->rr_flags |= RUMPRUNNER_DONE;
 	pthread_cond_broadcast(&w_cv);
 	pthread_mutex_unlock(&w_mtx);
 }
@@ -193,7 +197,7 @@ rumprun(int (*mainfun)(int, char *[]), int argc, char *argv[])
 	rr->rr_mainfun = mainfun;
 	rr->rr_argc = argc;
 	rr->rr_argv = argv;
-	rr->rr_done = 0;
+	rr->rr_flags = 0;
 
 	if (pthread_create(&rr->rr_mainthread, NULL, mainbouncer, rr) != 0) {
 		fprintf(stderr, "rumprun: running %s failed\n", argv[0]);
@@ -202,6 +206,16 @@ rumprun(int (*mainfun)(int, char *[]), int argc, char *argv[])
 	}
 	LIST_INSERT_HEAD(&rumprunners, rr, rr_entries);
 
+	pthread_mutex_lock(&w_mtx);
+	while ((rr->rr_flags & (RUMPRUNNER_DONE|RUMPRUNNER_DAEMON)) == 0) {
+		pthread_cond_wait(&w_cv, &w_mtx);
+	}
+	pthread_mutex_unlock(&w_mtx);
+
+	if (rr->rr_flags & RUMPRUNNER_DONE) {
+		rumprun_wait(rr);
+		rr = NULL;
+	}
 	return rr;
 }
 
@@ -212,6 +226,9 @@ rumprun_wait(void *cookie)
 	void *retval;
 
 	pthread_join(rr->rr_mainthread, &retval);
+	LIST_REMOVE(rr, rr_entries);
+	free(rr);
+
 	assert(rumprun_done > 0);
 	rumprun_done--;
 
@@ -231,8 +248,7 @@ rumprun_get_finished(void)
 		pthread_cond_wait(&w_cv, &w_mtx);
 	}
 	LIST_FOREACH(rr, &rumprunners, rr_entries) {
-		if (rr->rr_done) {
-			LIST_REMOVE(rr, rr_entries);
+		if (rr->rr_flags & RUMPRUNNER_DONE) {
 			break;
 		}
 	}
@@ -240,6 +256,29 @@ rumprun_get_finished(void)
 	assert(rr);
 
 	return rr;
+}
+
+/*
+ * Detaches current program.  Must always be called from
+ * the main thread of an application.
+ *
+ * XXX: there's no public prototype for this for now.
+ */
+void
+rumprun_daemon(void)
+{
+	struct rumprunner *rr;
+
+	LIST_FOREACH(rr, &rumprunners, rr_entries) {
+		if (rr->rr_mainthread == pthread_self())
+			break;
+	}
+	assert(rr);
+
+	pthread_mutex_lock(&w_mtx);
+	rr->rr_flags |= RUMPRUNNER_DAEMON;
+	pthread_cond_broadcast(&w_cv);
+	pthread_mutex_unlock(&w_mtx);
 }
 
 void __dead

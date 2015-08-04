@@ -23,10 +23,10 @@
  * SUCH DAMAGE.
  */
 
-#include <bmk/kernel.h>
+#include <hw/kernel.h>
 
 void
-bmk_x86_initpic(void)
+x86_initpic(void)
 {
 
 	/*
@@ -46,29 +46,19 @@ bmk_x86_initpic(void)
 	outb(PIC2_DATA, 0xff);	/* all masked */
 }
 
-void
-bmk_x86_inittimer(void)
-{
-
-	/* initialize the timer to 100Hz */
-	outb(TIMER_MODE, TIMER_RATEGEN | TIMER_16BIT);
-	outb(TIMER_CNTR, (TIMER_HZ/HZ) & 0xff);
-	outb(TIMER_CNTR, (TIMER_HZ/HZ) >> 8);
-}
-
 /* interrupt-not-service-routine */
-void bmk_cpu_insr(void);
+void cpu_insr(void);
 
 void
-bmk_x86_initidt(void)
+x86_initidt(void)
 {
 	int i;
 
-	for (i = 0; i < 32; i++) {
-		bmk_x86_fillgate(i, bmk_cpu_insr, 0);
+	for (i = 0; i < 48; i++) {
+		x86_fillgate(i, cpu_insr, 0);
 	}
 
-#define FILLGATE(n) bmk_x86_fillgate(n, bmk_x86_trap_##n, 0)
+#define FILLGATE(n) x86_fillgate(n, x86_trap_##n, 0)
 	FILLGATE(0);
 	FILLGATE(2);
 	FILLGATE(3);
@@ -84,6 +74,44 @@ bmk_x86_initidt(void)
 	FILLGATE(14);
 	FILLGATE(17);
 #undef FILLGATE
-	bmk_x86_fillgate(2, bmk_x86_trap_2, 2);
-	bmk_x86_fillgate(8, bmk_x86_trap_8, 3);
+	x86_fillgate(2, x86_trap_2, 2);
+	x86_fillgate(8, x86_trap_8, 3);
+}
+
+void
+x86_cpuid(uint32_t level, uint32_t *eax_out, uint32_t *ebx_out,
+		uint32_t *ecx_out, uint32_t *edx_out)
+{
+	uint32_t eax_, ebx_, ecx_, edx_;
+
+	/*
+	 * Verify if the requested CPUID level is supported. If not, just
+	 * zero everything and return, hoping the caller knows what to do.
+	 * This is better than the documented operation for invalid values of
+	 * level, which is to behave as if CPUID had been called with the
+	 * maximum supported level.
+	 */
+	eax_ = (level < 0x80000000) ? 0 : 0x80000000;
+	__asm__(
+		"cpuid"
+		: "=a" (eax_), "=b" (ebx_), "=c" (ecx_), "=d" (edx_)
+		: "0" (eax_)
+	);
+	if (eax_ < level) {
+		*eax_out = *ebx_out = *ecx_out = *edx_out = 0;
+		return;
+	}
+
+	/*
+	 * Call requested CPUID level.
+	 */
+	__asm__(
+		"cpuid"
+		: "=a" (eax_), "=b" (ebx_), "=c" (ecx_), "=d" (edx_)
+		: "0" (level)
+	);
+	*eax_out = eax_;
+	*ebx_out = ebx_;
+	*ecx_out = ecx_;
+	*edx_out = edx_;
 }

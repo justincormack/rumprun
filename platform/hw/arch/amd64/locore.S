@@ -23,8 +23,8 @@
  * SUCH DAMAGE.
  */
 
-#include <bmk/kernel.h>
-#include <bmk/multiboot.h>
+#include <hw/kernel.h>
+#include <hw/multiboot.h>
 
 #define MYMULTIBOOT_FLAGS \
     (MULTIBOOT_PAGE_ALIGN | MULTIBOOT_MEMORY_INFO | MULTIBOOT_AOUT_KLUDGE)
@@ -59,12 +59,21 @@ ENTRY(_start)
 	cld
 	movl $bootstack, %esp
 
+	/* save multiboot info pointer at top of stack, we pop it in 64bit */
+	pushl $0
+	pushl %ebx
+
+	/* clear console */
+	pushl %eax
+	movw $0x20, %ax
+	movl $(CONS_ADDRESS), %edi
+	movl $(CONS_WIDTH*CONS_HEIGHT), %ecx
+	rep stosw
+	popl %eax
+
 	/* only multiboot is supported for now */
 	cmpl $MULTIBOOT_BOOTLOADER_MAGIC, %eax
 	jne nomultiboot
-
-	/* store multiboot structure address, process contents later in C */
-	movl %ebx, bmk_cpu_multiboot_info
 
 	lgdt (gdt64_ptr)
 	pushl $0x0
@@ -97,7 +106,7 @@ ENTRY(_start)
 	wrmsr
 
 	/* 3: load pml4 pointer */
-	movl $bmk_cpu_pml4, %eax
+	movl $cpu_pml4, %eax
 	movl %eax, %cr3
 
 	/* 4: enable paging */
@@ -114,15 +123,27 @@ ENTRY(_start)
 	jmp haltme
 
 nomultiboot:
-	/*
-	 * XXX: should print something, but can't call C code yet.
-	 * write putc in asm or something else?
-	 */
+	/* we don't have printf available yet, just output manually */
+	mov $nomultimesg, %ebx
+	mov $(CONS_ADDRESS), %ecx
+1:
+	movsbl (%ebx), %eax
+	test %al, %al
+	je haltme
+	orl $0x500, %eax
+	movl %eax, (%ecx)
+	inc %ebx
+	addl $2, %ecx
+	jmp 1b
+
 haltme:
 	cli
 	hlt
 	jmp haltme
 END(_start)
+
+nomultimesg:
+	.asciz "not multibooted, halting!"
 
 #include "pagetable.S"
 
@@ -136,8 +157,8 @@ END(_start)
 
 .data
 .align 64
-.globl bmk_cpu_gdt64
-bmk_cpu_gdt64:
+.globl cpu_gdt64
+cpu_gdt64:
 	.quad 0x0000000000000000
 	.quad 0x00af9b000000ffff	/* 64bit CS		*/
 	.quad 0x00cf9b000000ffff	/* 32bit CS		*/
@@ -149,8 +170,8 @@ gdt64_end:
 
 .type gdt64_ptr, @object
 gdt64_ptr:
-	.word gdt64_end-bmk_cpu_gdt64-1
-	.quad bmk_cpu_gdt64
+	.word gdt64_end-cpu_gdt64-1
+	.quad cpu_gdt64
 
 .code64
 
@@ -158,19 +179,22 @@ ENTRY(_start64)
 	movq $bootstack, %rsp
 	xorq %rbp, %rbp
 
+	/* read multiboot info pointer */
+	movq -8(%rsp), %rdi
+
 	pushq $0x0
 	pushq $0x0
 
-	call bmk_cpu_boot
+	call x86_boot
 	hlt
 END(_start64)
 
-ENTRY(bmk_amd64_lidt)
+ENTRY(amd64_lidt)
 	lidt (%rdi)
 	ret
-END(bmk_amd64_lidt)
+END(amd64_lidt)
 
-ENTRY(bmk_amd64_ltr)
+ENTRY(amd64_ltr)
 	ltr %di
 	ret
-END(bmk_amd64_ltr)
+END(amd64_ltr)

@@ -23,22 +23,26 @@
  * SUCH DAMAGE.
  */
 
-#include <bmk/types.h>
-#include <bmk/kernel.h>
-#include <bmk/multiboot.h>
+#include <hw/types.h>
+#include <hw/kernel.h>
+#include <hw/multiboot.h>
 
 #include <bmk-core/core.h>
 #include <bmk-core/sched.h>
+#include <bmk-core/printf.h>
 
 void
-bmk_cpu_boot(struct multiboot_info *mbi)
+x86_boot(struct multiboot_info *mbi)
 {
 
-	bmk_cpu_init();
+	bmk_printf_init(cons_putc, NULL);
+	bmk_printf("rump kernel bare metal bootstrap\n\n");
+
+	cpu_init();
 	bmk_sched_init();
-	bmk_multiboot(mbi);
+	multiboot(mbi);
 
 	spl0();
 
-	bmk_run(bmk_multiboot_cmdline);
+	run(multiboot_cmdline);
 }

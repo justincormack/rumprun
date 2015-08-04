@@ -23,9 +23,9 @@
  * SUCH DAMAGE.
  */
 
-#include <bmk/types.h>
-#include <bmk/multiboot.h>
-#include <bmk/kernel.h>
+#include <hw/types.h>
+#include <hw/multiboot.h>
+#include <hw/kernel.h>
 
 #include <bmk-core/core.h>
 #include <bmk-core/string.h>
@@ -36,44 +36,22 @@
 #include <bmk-core/queue.h>
 #include <bmk-core/sched.h>
 
-unsigned long bmk_membase;
-unsigned long bmk_memsize;
-
-void *
-bmk_platform_allocpg2(int shift)
-{
-
-	return (void *)bmk_pgalloc(shift);
-}
-
-void
-bmk_platform_freepg2(void *mem, int shift)
-{
-
-	bmk_pgfree(mem, shift);
-}
-
-unsigned long
-bmk_platform_memsize(void)
-{
-
-	return bmk_memsize;
-}
+int spldepth = 1;
 
 void
 bmk_platform_block(bmk_time_t until)
 {
-	int s = bmk_spldepth;
+	int s = spldepth;
 
 	/* enable interrupts around the sleep */
-	if (bmk_spldepth) {
-		bmk_spldepth = 1;
+	if (spldepth) {
+		spldepth = 1;
 		spl0();
 	}
-	bmk_cpu_nanohlt();
+	cpu_block(until);
 	if (s) {
 		splhigh();
-		bmk_spldepth = s;
+		spldepth = s;
 	}
 }
 
@@ -96,10 +74,10 @@ bmk_platform_splx(unsigned long x)
 }
  
 void
-bmk_run(char *cmdline)
+run(char *cmdline)
 {
 
-	bmk_sched_startmain(bmk_mainthread, cmdline);
+	bmk_sched_startmain(mainthread, cmdline);
 }
 
 void __attribute__((noreturn))
@@ -108,7 +86,7 @@ bmk_platform_halt(const char *panicstring)
 
 	if (panicstring)
 		bmk_printf("PANIC: %s\n", panicstring);
-	bmk_printf("halted (well, spinning ...)\n");
+	bmk_printf("halted\n");
 	for (;;)
-		continue;
+		hlt();
 }

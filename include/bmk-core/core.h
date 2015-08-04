@@ -37,6 +37,13 @@ int bmk_core_init(unsigned long, unsigned long);
 	}								\
   } while (0)
 
-extern unsigned long bmk_stackpageorder, bmk_stacksize, bmk_pagesize;
+extern unsigned long bmk_stackpageorder, bmk_stacksize;
+extern unsigned long bmk_pageshift, bmk_pagesize;
+
+void *bmk_mainstackbase;
+unsigned long bmk_mainstacksize;
+
+#define bmk_round_page(_p_) (((_p_) + (bmk_pagesize-1)) & ~(bmk_pagesize-1))
+#define bmk_trunc_page(_p_) ((_p_) & ~(bmk_pagesize-1))
 
 #endif /* _BMK_CORE_CORE_H_ */

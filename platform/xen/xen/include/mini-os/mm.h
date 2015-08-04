@@ -43,10 +43,6 @@
 
 
 void init_mm(void);
-unsigned long minios_alloc_pages(int order);
-#define minios_alloc_page()    minios_alloc_pages(0)
-void minios_free_pages(void *pointer, int order);
-#define minios_free_page(p)    minios_free_pages(p, 0)
 
 static __inline__ int get_order(unsigned long size)
 {
@@ -67,13 +63,15 @@ void *minios_map_frames_ex(const unsigned long *f, unsigned long n,
 	unsigned long stride,
 	unsigned long increment, unsigned long alignment, domid_t id,
 	int *err, unsigned long prot);
-void do_map_frames(unsigned long addr,
-        const unsigned long *f, unsigned long n, unsigned long stride,
+void minios_map_frames(unsigned long addr,
+    const unsigned long *f, unsigned long n, unsigned long stride,
 	unsigned long increment, domid_t id, int *err, unsigned long prot);
 int unmap_frames(unsigned long va, unsigned long num_frames);
 unsigned long minios_alloc_contig_pages(int order, unsigned int addr_bits);
 
 int free_physical_pages(xen_pfn_t *mfns, int n);
 void fini_mm(void);
+
+unsigned long long minios_get_l1prot(void);
 
 #endif /* _MINIOS_MM_H_ */

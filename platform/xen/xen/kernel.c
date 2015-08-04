@@ -44,6 +44,7 @@
 #include <xen/version.h>
 
 #include <bmk-core/core.h>
+#include <bmk-core/pgalloc.h>
 #include <bmk-core/printf.h>
 
 uint8_t _minios_xen_features[XENFEAT_NR_SUBMAPS * 32];
@@ -86,20 +87,6 @@ bmk_platform_halt(const char *panicstring)
 	minios_do_halt(MINIOS_HALT_POWEROFF);
 }
 
-void *
-bmk_platform_allocpg2(int shift)
-{
-
-	return (void *)minios_alloc_pages(shift);
-}
-
-void
-bmk_platform_freepg2(void *p, int shift)
-{
-
-	minios_free_pages(p, shift);
-}
-
 void
 bmk_platform_block(bmk_time_t until)
 {
@@ -131,7 +118,7 @@ void _minios_start_kernel(start_info_t *si)
 {
 
     bmk_printf_init(minios_putc, NULL);
-    bmk_core_init(STACK_SIZE_PAGE_ORDER, PAGE_SIZE);
+    bmk_core_init(STACK_SIZE_PAGE_ORDER, PAGE_SHIFT);
 
     arch_init(si);
     trap_init();

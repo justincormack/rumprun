@@ -4,7 +4,6 @@ PLATFORM_DEFAULT_TESTER=xen
 .PHONY: default
 default: prepare mini-os commonlibs rumprun app-tools buildtest
 
-include ../../config.mk
 include ../../global.mk
 -include config.mk
 ifdef BUILDRUMP_TOOLFLAGS
@@ -21,8 +20,6 @@ OBJ_DIR ?= $(CURDIR)/obj
 
 include ../Makefile.inc
 
-OBJCOPY=objcopy
-
 CPPFLAGS = -isystem rump/include -isystem xen/include -I. -I../../include
 CPPFLAGS+= -nostdinc
 CPPFLAGS+= -no-integrated-cpp -nostdinc
@@ -38,7 +35,7 @@ ifeq ($(MACHINE),x86_64)
 CFLAGS += -mno-red-zone -fno-reorder-blocks -fno-asynchronous-unwind-tables
 endif
 
-LDFLAGS=	-L$(abspath rump/lib)
+LDFLAGS_BAKE+=	-L$(abspath rump/lib)
 
 rump-src-y += rumphyper_bio.c
 
@@ -67,11 +64,10 @@ rumprun: $(OBJ_DIR)/rumprun.o
 $(OBJ_DIR)/rumprun.o: $(RUMP_OBJS) commonlibs
 	$(CC) -Wl,-r $(CFLAGS) $(LDFLAGS) $(RUMP_OBJS) -nostdlib -o $@
 
-APP_TOOLS_TARGETARCH= $(MACHINE)
 APP_TOOLS_PLATFORM= xen
-APP_TOOLS_HEADOBJ= $(abspath $(OBJ_DIR)/xen/minios.o)
-APP_TOOLS_OBJS= $(abspath $(OBJ_DIR)/rumprun.o)
-APP_TOOLS_LDSCRIPT:= $(abspath $(OBJ_DIR)/xen/minios.lds)
+APP_TOOLS_OBJS_BAKE=	$(abspath $(OBJ_DIR)/xen/minios.o)
+APP_TOOLS_OBJS_BAKE+=	$(abspath $(OBJ_DIR)/rumprun.o)
+APP_TOOLS_LDSCRIPT_BAKE:= $(abspath $(OBJ_DIR)/xen/minios.lds)
 APP_TOOLS_DIR= $(abspath ../../app-tools)
 
 include $(APP_TOOLS_DIR)/Makefile.app-tools

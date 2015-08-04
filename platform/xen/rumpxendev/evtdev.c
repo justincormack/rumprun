@@ -30,17 +30,16 @@
 #include <sys/cdefs.h>
 #include <sys/atomic.h>
 #include <sys/kmem.h>
+#include <sys/resource.h>
+#include <sys/vnode.h>
 
 #include "rumpxen_xendev.h"
 
 #include <bmk-rumpuser/rumpuser.h>
 #include <bmk-core/memalloc.h>
 
-#pragma GCC diagnostic ignored "-Wcast-qual"
-/* mini-os/os.h has some bad casts */
 #include <mini-os/events.h>
 #include <mini-os/wait.h>
-#pragma GCC diagnostic error "-Wcast-qual"
 
 /* For ioctl interface. */
 #include "xenio3.h"

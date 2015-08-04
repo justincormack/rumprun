@@ -23,7 +23,7 @@
  * SUCH DAMAGE.
  */
 
-#include <bmk/kernel.h>
+#include <hw/kernel.h>
 
 #include <bmk-core/sched.h>
 
@@ -31,12 +31,12 @@ bmk_time_t
 bmk_platform_clock_monotonic(void)
 {
 
-	return bmk_cpu_clock_now();
+	return cpu_clock_now();
 }
 
 bmk_time_t
 bmk_platform_clock_epochoffset(void)
 {
 
-	return 0; /* needs more bits */
+	return cpu_clock_epochoffset();
 }

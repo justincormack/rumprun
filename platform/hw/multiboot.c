@@ -23,9 +23,9 @@
  * SUCH DAMAGE.
  */
 
-#include <bmk/types.h>
-#include <bmk/multiboot.h>
-#include <bmk/kernel.h>
+#include <hw/types.h>
+#include <hw/multiboot.h>
+#include <hw/kernel.h>
 
 #include <bmk-core/core.h>
 #include <bmk-core/pgalloc.h>
@@ -56,41 +56,43 @@ parsemem(uint32_t addr, uint32_t len)
 	if (!(off < len))
 		bmk_platform_halt("multiboot memory chunk not found");
 
-	osend = round_page((unsigned long)_end);
+	osend = bmk_round_page((unsigned long)_end);
 	bmk_assert(osend > mbm->addr && osend < mbm->addr + mbm->len);
 
 	bmk_pgalloc_loadmem(osend, mbm->addr + mbm->len);
+
 	bmk_memsize = mbm->addr + mbm->len - osend;
 
 	return 0;
 }
 
-char bmk_multiboot_cmdline[BMK_MULTIBOOT_CMDLINE_SIZE];
+char multiboot_cmdline[BMK_MULTIBOOT_CMDLINE_SIZE];
 
 void
-bmk_multiboot(struct multiboot_info *mbi)
+multiboot(struct multiboot_info *mbi)
 {
 	unsigned long cmdlinelen;
 	char *cmdline;
 
-	bmk_printf_init(bmk_cons_putc, NULL);
-	bmk_core_init(BMK_THREAD_STACK_PAGE_ORDER, PAGE_SIZE);
-
-	bmk_printf("rump kernel bare metal multibootstrap\n\n");
+	bmk_core_init(BMK_THREAD_STACK_PAGE_ORDER, PAGE_SHIFT);
 
 	/* save the command line before something overwrites it */
-	cmdline = (char *)(uintptr_t)mbi->cmdline;
-	cmdlinelen = bmk_strlen(cmdline);
-	if (cmdlinelen >= BMK_MULTIBOOT_CMDLINE_SIZE)
-		bmk_platform_halt("command line too long, "
-		    "increase BMK_MULTIBOOT_CMDLINE_SIZE");
-	bmk_strcpy(bmk_multiboot_cmdline, cmdline);
+	if (mbi->flags & MULTIBOOT_INFO_CMDLINE) {
+		cmdline = (char *)(uintptr_t)mbi->cmdline;
+		cmdlinelen = bmk_strlen(cmdline);
+		if (cmdlinelen >= BMK_MULTIBOOT_CMDLINE_SIZE)
+			bmk_platform_halt("command line too long, "
+			    "increase BMK_MULTIBOOT_CMDLINE_SIZE");
+		bmk_strcpy(multiboot_cmdline, cmdline);
+	}
+	else
+		multiboot_cmdline[0] = 0;
 
-	if ((mbi->flags & MULTIBOOT_MEMORY_INFO) == 0)
+	if ((mbi->flags & MULTIBOOT_INFO_MEMORY) == 0)
 		bmk_platform_halt("multiboot memory info not available\n");
 
 	if (parsemem(mbi->mmap_addr, mbi->mmap_length) != 0)
 		bmk_platform_halt("multiboot memory parse failed");
 
-	bmk_intr_init();
+	intr_init();
 }

@@ -23,14 +23,11 @@
  * SUCH DAMAGE.
  */
 
-#include <bmk/types.h>
-#include <bmk/kernel.h>
+#include <hw/types.h>
+#include <hw/kernel.h>
 
 #include <bmk-core/core.h>
 #include <bmk-core/sched.h>
-
-/* enter the kernel with interrupts disabled */
-int bmk_spldepth = 1;
 
 /*
  * i386 MD descriptors, assimilated from NetBSD sys/arch/i386/include/segments.h
@@ -55,13 +52,10 @@ struct gate_descriptor {
 static struct gate_descriptor idt[256];
 
 /* interrupt-not-service-routine */
-void bmk_cpu_insr(void);
-
-/* actual interrupt service routines */
-void bmk_cpu_isr_clock(void);
+void cpu_insr(void);
 
 void
-bmk_x86_fillgate(int num, void *fun, int unused)
+x86_fillgate(int num, void *fun, int unused)
 {
 	struct gate_descriptor *gd = &idt[num];
 
@@ -138,7 +132,7 @@ adjustgs(uintptr_t p)
  * we can handle interrupts without involving a jump to hyperspace.
  */
 void
-bmk_cpu_init(void)
+cpu_init(void)
 {
 	struct region_descriptor region;
 
@@ -148,23 +142,16 @@ bmk_cpu_init(void)
 
 	region.rd_limit = sizeof(gdt)-1;
 	region.rd_base = (unsigned int)(uintptr_t)(void *)gdt;
-	bmk_cpu_lgdt(&region);
+	cpu_lgdt(&region);
 
-	bmk_x86_initidt();
+	x86_initidt();
 	region.rd_limit = sizeof(idt)-1;
 	region.rd_base = (unsigned int)(uintptr_t)(void *)idt;
-	bmk_cpu_lidt(&region);
+	cpu_lidt(&region);
 
-	bmk_x86_initpic();
+	x86_initpic();
 
-	/*
-	 * map clock interrupt.
-	 * note, it's still disabled in the PIC, we only enable it
-	 * during nanohlt
-	 */
-	bmk_x86_fillgate(32, bmk_cpu_isr_clock, 0);
-
-	bmk_x86_inittimer();
+	x86_initclocks();
 }
 
 void

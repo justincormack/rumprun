@@ -35,12 +35,12 @@ die()
 
 # Determine if we're being run as C or C++.
 case $0 in
-*-cc)
+*-gcc|*-clang)
 	CC="!CC!"
 	CFLAGS="!CFLAGS!"
 	EXTRALIBS=
 	;;
-*-c++)
+*-g++|*-clang++)
 	CC="!CXX!"
 	CFLAGS="!CXXFLAGS!"
 	EXTRALIBS=-lrumprun_unwind
@@ -50,17 +50,10 @@ case $0 in
 	exit 1
 	;;
 esac
-LDFLAGS="!LDFLAGS!"
 
-# Figure out what we're supposed to be doing. If called with '-bake' then we're
-# definitely baking. Otherwise assume we're linking and switch to compilation
-# if -c / -S / -E was passed.
-if [ "$1" = "-bake" ]; then
-	shift
-	MODE=bake
-else
-	MODE=link
-fi
+# Figure out what we're supposed to be doing. Assume we're fermenting
+# and switch to compilation if -c / -S / -E was passed.
+MODE=ferment
 WANTARG=
 # OUTFILE gets set to whatever is specified with -o (the real output file).
 OUTFILE=a.out
@@ -74,35 +67,40 @@ done
 
 case ${MODE} in
 compile)
-	# If we're compiling we don't really care which specs get used, might
-	# as well use the -final ones.
 	exec ${CC} ${CFLAGS} -no-integrated-cpp \
-	    -specs=!APPTOOLS!/rumprun-!APPTOOLS_PLATFORM!-specs-final \
+	    -specs=!APPTOOLS_DIR!/specs-compile_or_ferment \
 	    "$@" ${EXTRALIBS}
 	;;
-bake)
-	exec ${CC} ${CFLAGS} -no-integrated-cpp \
-	    -specs=!APPTOOLS!/rumprun-!APPTOOLS_PLATFORM!-specs-final \
-	    -Wl,--defsym=__RuMpRuN_baked__=0 \
-	    "$@" ${EXTRALIBS}
-	;;
-link)
+ferment)
 	# Link the real (from user's PoV) output file as a relocatable object,
 	# with no rump components. '-u main' is necessary to pull in main if the
 	# user is linking it in from a library.
 	${CC} ${CFLAGS} -no-integrated-cpp \
-	    -specs=!APPTOOLS!/rumprun-!APPTOOLS_PLATFORM!-specs-inter \
+	    -specs=!APPTOOLS_DIR!/specs-compile_or_ferment \
 	    -Wl,-r -Wl,-u,main \
-	    -Wl,--defsym=__RuMpRuN_fermented__=0 \
-	    "$@" ${EXTRALIBS} || die
+	    "$@" !APPTOOLS_DIR!/!GNUPLATFORM!-recipe.s ${EXTRALIBS} || die
+
+	if [ "${RUMPRUN_STUBLINK}" = succeed ]; then
+		exec 3>&1 2>&1
+		echo '!!!'
+		echo '!!! WARNING: $RUMPRUN_STUBLINK may be desupported without'
+		echo '!!!          warning in the future.  Do not rely on it'
+		echo '!!!          continuing to be available.'
+		echo '!!!'
+		exec 1>&3 3>&-
+	fi
 
 	# Try a stub link with minimal rump components. If that fails then stop.
 	${CC} ${CFLAGS} -no-integrated-cpp \
-	    -specs=!APPTOOLS!/rumprun-!APPTOOLS_PLATFORM!-specs-stub \
+	    -specs=!APPTOOLS_DIR!/specs-stub \
 	    ${OUTFILE} -o /dev/null
 	if [ $? -ne 0 ]; then
-		[ -f "${OUTFILE}" ] && rm -f ${OUTFILE}
-		die
+		if [ "${RUMPRUN_STUBLINK}" = "succeed" ]; then
+			echo "$0: warning: stub link failed, ignoring" 1>&2
+		else
+			[ -f "${OUTFILE}" ] && rm -f ${OUTFILE}
+			die
+		fi
 	fi
 
 	# Some build systems insist that the output looks like an executable.
