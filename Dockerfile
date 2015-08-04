@@ -22,15 +22,19 @@ RUN apt-get update && apt-get install -y \
   genisoimage \
   make
 
-COPY . /usr/src/rumprun
+COPY . /usr/src/rumprun-hw
+RUN cd /usr/src/rumprun-hw && git submodule update --init && \
+  cd /usr/src && cp -a rumprun-hw rumprun-xen
 
-ENV PATH=$PATH:/usr/src/rumprun/app-tools
+#ENV PATH=$PATH:/usr/src/rumprun/app-tools
 
-WORKDIR /usr/src/rumprun
+WORKDIR /usr/src/rumprun-hw
 
-RUN \
-  git submodule update --init && \
-  ./build-rr.sh hw
+RUN ./build-rr.sh hw
 #RUN \
 #  ./tests/buildtests.sh x86_64 hw elf && \
 #  ./tests/runtests.sh qemu
+
+WORKDIR /usr/src/rumprun-xen
+
+RUN ./build-rr.sh xen
