@@ -21,6 +21,9 @@ RUN apt-get update && apt-get install -y \
   file \
   genisoimage \
   bzip2 \
+  autoconf \
+  automake \
+  cmake \
   make
 
 COPY . /usr/src/rumprun-hw
