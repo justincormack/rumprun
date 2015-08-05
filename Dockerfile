@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y \
   vim \
   file \
   genisoimage \
+  bzip2 \
   make
 
 COPY . /usr/src/rumprun-hw
