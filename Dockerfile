@@ -23,6 +23,7 @@ RUN apt-get update && apt-get install -y \
   bzip2 \
   xz-utils \
   python3.4 \
+  openssl \
   autoconf \
   automake \
   cmake \
