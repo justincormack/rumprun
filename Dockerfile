@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y \
   file \
   genisoimage \
   bzip2 \
+  xz-utils \
   autoconf \
   automake \
   cmake \
