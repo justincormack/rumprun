@@ -22,6 +22,7 @@ RUN apt-get update && apt-get install -y \
   genisoimage \
   bzip2 \
   xz-utils \
+  python3.4 \
   autoconf \
   automake \
   cmake \
